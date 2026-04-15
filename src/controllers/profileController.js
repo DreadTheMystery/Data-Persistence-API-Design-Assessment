@@ -1,4 +1,4 @@
-const { v7: uuidv7 } = require("uuid");
+const { generateUuidV7 } = require("../utils/uuid");
 const {
   findByName,
   findById,
@@ -66,7 +66,7 @@ async function createProfileHandler(req, res) {
 
     const data = await fetchProfileData(name);
 
-    const id = uuidv7();
+    const id = generateUuidV7();
     const profile = createProfile(id, name, data);
 
     return res.status(201).json({
@@ -74,6 +74,16 @@ async function createProfileHandler(req, res) {
       data: profile,
     });
   } catch (error) {
+    // Log detailed error information for debugging
+    // This will not be returned to the client but helps identify root cause.
+    // eslint-disable-next-line no-console
+    console.error("createProfileHandler error", {
+      message: error && error.message,
+      statusCode: error && error.statusCode,
+      name: error && error.name,
+      responseStatus: error && error.response && error.response.status,
+    });
+
     if (error.statusCode === 502) {
       return res.status(502).json({
         status: "error",

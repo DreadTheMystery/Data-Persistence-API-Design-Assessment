@@ -5,7 +5,9 @@ const AGIFY_URL = "https://api.agify.io";
 const NATIONALIZE_URL = "https://api.nationalize.io";
 
 async function fetchGender(name) {
-  const response = await axios.get(GENDERIZE_URL, { params: { name } });
+  const response = await axios.get(GENDERIZE_URL, {
+    params: { name },
+  });
   const data = response.data || {};
 
   if (data.gender === null || data.count === 0) {
@@ -23,7 +25,9 @@ async function fetchGender(name) {
 }
 
 async function fetchAge(name) {
-  const response = await axios.get(AGIFY_URL, { params: { name } });
+  const response = await axios.get(AGIFY_URL, {
+    params: { name },
+  });
   const data = response.data || {};
 
   if (data.age === null || data.age === undefined) {
@@ -39,7 +43,9 @@ async function fetchAge(name) {
 }
 
 async function fetchNationality(name) {
-  const response = await axios.get(NATIONALIZE_URL, { params: { name } });
+  const response = await axios.get(NATIONALIZE_URL, {
+    params: { name },
+  });
   const data = response.data || {};
 
   const countries = Array.isArray(data.country) ? data.country : [];
@@ -63,11 +69,9 @@ async function fetchNationality(name) {
 
 async function fetchProfileData(name) {
   try {
-    const [gender, age, nationality] = await Promise.all([
-      fetchGender(name),
-      fetchAge(name),
-      fetchNationality(name),
-    ]);
+    const gender = await fetchGender(name);
+    const age = await fetchAge(name);
+    const nationality = await fetchNationality(name);
 
     return { ...gender, ...age, ...nationality };
   } catch (error) {
@@ -76,12 +80,12 @@ async function fetchProfileData(name) {
         `${error.externalApi} returned an invalid response`,
       );
       wrapped.statusCode = 502;
-      throw wrapped;
+      return Promise.reject(wrapped);
     }
 
     const generic = new Error("Upstream service failure");
     generic.statusCode = 502;
-    throw generic;
+    return Promise.reject(generic);
   }
 }
 
