@@ -8,6 +8,21 @@ const port = process.env.PORT || 3000;
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
+// Simple request logging middleware (method, URL, status, duration)
+app.use((req, res, next) => {
+  const start = Date.now();
+
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    // eslint-disable-next-line no-console
+    console.log(
+      `${req.method} ${req.originalUrl} -> ${res.statusCode} (${duration}ms)`,
+    );
+  });
+
+  next();
+});
+
 app.use("/api/profiles", profilesRouter);
 
 app.get("/", (req, res) => {
