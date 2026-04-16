@@ -55,11 +55,11 @@ async function createProfileHandler(req, res) {
   const name = validation.name;
 
   try {
-    const existing = findByName(name);
+    const existing = await findByName(name);
     if (existing) {
       return res.status(200).json({
         status: "success",
-        message: "Profile already exists",
+        message: "User already available",
         data: existing,
       });
     }
@@ -67,22 +67,15 @@ async function createProfileHandler(req, res) {
     const data = await fetchProfileData(name);
 
     const id = generateUuidV7();
-    const profile = createProfile(id, name, data);
+    const profile = await createProfile(id, name, data);
 
     return res.status(201).json({
       status: "success",
       data: profile,
     });
   } catch (error) {
-    // Log detailed error information for debugging
-    // This will not be returned to the client but helps identify root cause.
     // eslint-disable-next-line no-console
-    console.error("createProfileHandler error", {
-      message: error && error.message,
-      statusCode: error && error.statusCode,
-      name: error && error.name,
-      responseStatus: error && error.response && error.response.status,
-    });
+    console.error("createProfileHandler error FULL:", error);
 
     if (error.statusCode === 502) {
       return res.status(502).json({
@@ -98,9 +91,9 @@ async function createProfileHandler(req, res) {
   }
 }
 
-function getSingleProfileHandler(req, res) {
+async function getSingleProfileHandler(req, res) {
   const { id } = req.params;
-  const profile = findById(id);
+  const profile = await findById(id);
 
   if (!profile) {
     return res.status(404).json({
@@ -115,10 +108,10 @@ function getSingleProfileHandler(req, res) {
   });
 }
 
-function getAllProfilesHandler(req, res) {
+async function getAllProfilesHandler(req, res) {
   const { gender, country_id, age_group } = req.query;
 
-  const profiles = listProfiles({ gender, country_id, age_group });
+  const profiles = await listProfiles({ gender, country_id, age_group });
 
   const data = profiles.map((p) => ({
     id: p.id,
@@ -136,10 +129,10 @@ function getAllProfilesHandler(req, res) {
   });
 }
 
-function deleteProfileHandler(req, res) {
+async function deleteProfileHandler(req, res) {
   const { id } = req.params;
 
-  const deleted = deleteProfile(id);
+  const deleted = await deleteProfile(id);
 
   if (!deleted) {
     return res.status(404).json({
