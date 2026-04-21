@@ -1,27 +1,20 @@
 const { createClient } = require("@supabase/supabase-js");
-const { fetch, Agent } = require("undici");
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
 
-const ipv4Dispatcher = new Agent({
-  connect: {
-    family: 4,
-  },
-});
+let supabase;
 
-function ipv4Fetch(input, init = {}) {
-  return fetch(input, {
-    ...init,
-    dispatcher: ipv4Dispatcher,
-  });
-}
+if (supabaseUrl && supabaseKey) {
+  supabase = createClient(supabaseUrl, supabaseKey);
+} else {
+  const error = new Error("Supabase environment variables are not configured");
+  error.statusCode = 500;
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY,
-  {
-    global: {
-      fetch: ipv4Fetch,
+  supabase = {
+    from() {
+      throw error;
     },
-  },
-);
+  };
+}
 
 module.exports = supabase;
