@@ -1,182 +1,192 @@
-# Backend Wizards — Stage 2 (Intelligence Query Engine)
+# Insighta Labs+ Backend (Stage 3)
 
-## Overview
+## System Architecture
 
-This API stores demographic profiles and supports:
+This repository is the backend core for Insighta Labs+.
 
-- Advanced filtering
+- **Backend API (this repo)**: auth, role enforcement, profile intelligence, CSV export
+- **CLI (separate repo target)**: user/power-user interface using OAuth PKCE
+- **Web Portal (separate repo target)**: browser UI with HTTP-only cookie sessions
+
+All interfaces share the same backend and database as the source of truth.
+
+## What Stage 3 Adds
+
+- GitHub OAuth (web + CLI PKCE flow support)
+- Access + refresh token lifecycle with rotation
+- Role-based access control (`admin`, `analyst`)
+- API version header requirement for `/api/*`
+- Updated paginated response shape (`total_pages`, `links`)
+- CSV profile export endpoint
+- Rate limiting
+- Request logging
+
+## Stage 2 Compatibility
+
+Existing Stage 2 capabilities are preserved:
+
+- Filtering
 - Sorting
 - Pagination
-- Rule-based natural language search
-- Idempotent data seeding from `src/seed_profiles.json` (2026 records)
+- Natural language query parsing
 
-## Stack
+## Environment Variables
 
-- Node.js + Express
-- Supabase (PostgreSQL)
-- `@supabase/supabase-js`
-
-## Environment
-
-Create `.env` from `.env.example`:
+Required:
 
 - `SUPABASE_URL`
 - `SUPABASE_KEY`
+- `GITHUB_CLIENT_ID`
+- `GITHUB_CLIENT_SECRET`
+- `JWT_SECRET`
 
-## Run
+Optional:
 
-- Start app: `npm start`
-- Seed data: `npm run seed`
+- `BACKEND_BASE_URL`
+- `WEB_PORTAL_URL`
 
-## Required table structure
+## Database Setup
 
-`profiles` table should contain:
+Run both SQL scripts in Supabase SQL editor:
 
-- `id` (UUID v7, PK)
-- `name` (VARCHAR, UNIQUE)
-- `gender` (VARCHAR)
-- `gender_probability` (FLOAT)
-- `age` (INT)
-- `age_group` (VARCHAR)
-- `country_id` (VARCHAR(2))
-- `country_name` (VARCHAR)
-- `country_probability` (FLOAT)
-- `created_at` (TIMESTAMP)
+1. `scripts/createProfilesTable.sql`
+2. `scripts/createAuthTables.sql`
 
-Schema helper SQL is provided in `scripts/createProfilesTable.sql`.
+Then seed profiles:
 
-## Endpoints
+- `npm run seed`
 
-### `POST /api/profiles`
+## Auth Flow
 
-Creates a profile by calling the upstream demographic APIs and storing the result in Supabase.
+### Web OAuth
 
-### `GET /api/profiles/:id`
+1. User starts at `GET /auth/github?mode=web`
+2. Backend generates PKCE verifier/challenge and state (cookie-based)
+3. Redirect to GitHub
+4. GitHub callback to `GET /auth/github/callback`
+5. Backend exchanges code, upserts user, issues token pair
+6. Tokens set as HTTP-only cookies
 
-Fetches a single stored profile by UUID.
+### CLI OAuth with PKCE
 
-### `GET /api/profiles`
+1. CLI calls `GET /auth/github?mode=cli&state=...&code_challenge=...&redirect_uri=...`
+2. User logs in via browser and returns to CLI local callback
+3. CLI sends code exchange to `POST /auth/github/cli/exchange` with `code_verifier`
+4. Backend validates PKCE + state, issues token pair
+5. CLI stores credentials at `~/.insighta/credentials.json`
 
-Supports combined filters:
+## Token Handling Approach
 
-- `gender`
-- `age_group`
-- `country_id`
-- `min_age`
-- `max_age`
-- `min_gender_probability`
-- `min_country_probability`
+- Access token (JWT): **3 minutes**
+- Refresh token (opaque): **5 minutes**
+- Refresh rotation: every `/auth/refresh` request invalidates old refresh token and issues a new pair
+- Logout: refresh token is revoked server-side
 
-Sorting:
+## Role Enforcement Logic
 
-- `sort_by`: `age | created_at | gender_probability`
-- `order`: `asc | desc`
+Role model:
 
-Pagination:
+- `admin`: create/delete profiles + all read/search
+- `analyst`: read/search only
 
-- `page` (default `1`)
-- `limit` (default `10`, max `50`)
+Enforcement:
 
-Response:
+- Global auth middleware protects `/api/*`
+- Role middleware enforces admin-only endpoints:
+  - `POST /api/profiles`
+  - `DELETE /api/profiles/:id`
+
+If user is inactive (`is_active = false`): `403 Forbidden`
+
+## API Versioning
+
+All `/api/*` requests must include:
+
+- `X-API-Version: 1`
+
+Without it:
 
 ```json
-{
-  "status": "success",
-  "page": 1,
-  "limit": 10,
-  "total": 2026,
-  "data": []
-}
+{ "status": "error", "message": "API version header required" }
 ```
 
-### `GET /api/profiles/search`
+## Pagination Shape
 
-Query param:
+`GET /api/profiles` and `GET /api/profiles/search` now return:
 
-- `q` (plain English)
+- `page`
+- `limit`
+- `total`
+- `total_pages`
+- `links.self`
+- `links.next`
+- `links.prev`
+- `data`
 
-Supports pagination (`page`, `limit`) like `/api/profiles`.
+## CSV Export
 
-### `DELETE /api/profiles/:id`
+Endpoint:
 
-Deletes a stored profile by UUID and returns `404` when the profile does not exist.
+- `GET /api/profiles/export?format=csv`
 
-## Natural language parsing approach (rule-based)
+Supports the same filters and sorting as list endpoint.
+Returns downloadable CSV with required columns.
 
-Parser is fully rule-based (no AI/LLM) in `src/services/queryParser.js`.
+## Natural Language Parsing Approach
 
-### Supported keywords and mappings
+Rule-based parser in `src/services/queryParser.js`.
 
-#### Gender
+Supported mappings include:
 
-- `male`, `males`, `man`, `men`, `boy`, `boys` → `gender=male`
-- `female`, `females`, `woman`, `women`, `girl`, `girls` → `gender=female`
-- If both male and female are present, gender filter is omitted.
+- gender keywords
+- age groups
+- `young` => `min_age=16`, `max_age=24`
+- age comparators (`above`, `below`, `between`)
+- country name to ISO code mapping using seeded dataset
 
-#### Age groups
-
-- `child`, `children` → `age_group=child`
-- `teen`, `teens`, `teenager`, `teenagers` → `age_group=teenager`
-- `adult`, `adults` → `age_group=adult`
-- `senior`, `seniors`, `elderly`, `old` → `age_group=senior`
-
-#### Young keyword
-
-- `young` → `min_age=16`, `max_age=24`
-
-#### Age comparators
-
-- `above N`, `over N`, `older than N`, `greater than N`, `at least N` → `min_age=N`
-- `below N`, `under N`, `younger than N`, `less than N`, `at most N` → `max_age=N`
-- `between A and B` → `min_age=min(A,B)`, `max_age=max(A,B)`
-
-#### Country
-
-Country names are matched against names found in `src/seed_profiles.json`, then mapped automatically to ISO code.
-
-- Example: `from nigeria` → `country_id=NG`
-
-### Parser logic flow
-
-1. Normalize query text with lowercase, accent-insensitive cleanup, and punctuation stripping.
-2. Extract gender intent with regex word boundaries.
-3. Extract age-group intent.
-4. Apply `young` rule.
-5. Extract numeric age constraints.
-6. Match country name from the seeded dataset and map to `country_id`.
-7. If no interpretable token is found, return:
+Returns null when query is not interpretable; controller returns:
 
 ```json
 { "status": "error", "message": "Unable to interpret query" }
 ```
 
-## Limitations
+## Rate Limiting & Logging
 
-- Does not support spelling mistakes/fuzzy matching (e.g., `nigeri` instead of `nigeria`).
-- Does not support highly complex sentence structures with multiple independent clauses.
-- Country matching only works for country names present in the seed dataset map.
-- Does not support OR logic groups beyond the explicit male+female handling.
-- Ambiguous country terms are matched by the first strongest tokenized name match.
+Rate limits:
 
-## Validation and errors
+- `/auth/*`: 10 req/min (IP)
+- `/api/*`: 60 req/min per authenticated user
 
-Error shape:
+Logging:
+
+- method
+- endpoint
+- status code
+- response time
+
+## CLI Usage (Target)
+
+The backend supports these CLI command flows:
+
+- `insighta login`
+- `insighta logout`
+- `insighta whoami`
+- `insighta profiles list ...`
+- `insighta profiles get <id>`
+- `insighta profiles search "..."`
+- `insighta profiles create --name "..."`
+- `insighta profiles export --format csv`
+
+## Run
+
+- `npm install`
+- `npm start`
+- `npm run seed`
+
+## Error Format
+
+All errors use:
 
 ```json
-{ "status": "error", "message": "<error message>" }
+{ "status": "error", "message": "<message>" }
 ```
-
-Used responses:
-
-- `400` Missing/empty parameter
-- `422` Invalid query parameters
-- `404` Profile not found
-- `500` Upstream or server failure
-- `502` External upstream failure (profile creation flow)
-
-## Notes
-
-- CORS is enabled with `Access-Control-Allow-Origin: *`.
-- Timestamps are stored as UTC ISO 8601 strings.
-- Seeding is idempotent using upsert on unique `name`.
-- Country lookup is derived from the seeded JSON dataset, not a hardcoded country list.

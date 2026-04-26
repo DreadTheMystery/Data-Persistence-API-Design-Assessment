@@ -4,15 +4,18 @@ const {
   getSingleProfileHandler,
   getAllProfilesHandler,
   searchProfilesHandler,
+  exportProfilesHandler,
   deleteProfileHandler,
 } = require("../controllers/profileController");
+const { requireRole } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
-router.post("/", createProfileHandler);
+router.post("/", requireRole("admin"), createProfileHandler);
 router.get("/", getAllProfilesHandler);
 router.get("/search", searchProfilesHandler);
+router.get("/export", exportProfilesHandler);
 router.get("/:id", getSingleProfileHandler);
-router.delete("/:id", deleteProfileHandler);
+router.delete("/:id", requireRole("admin"), deleteProfileHandler);
 
 module.exports = router;

@@ -4,6 +4,7 @@ const {
   findById,
   createProfile,
   listProfiles,
+  exportProfiles,
   deleteProfile,
 } = require("../models/profileModel");
 const { fetchProfileData } = require("../services/externalApisService");
@@ -22,6 +23,28 @@ const ALLOWED_LIST_QUERY_KEYS = new Set([
   "page",
   "limit",
 ]);
+
+function buildPaginationLinks(req, page, limit, totalPages) {
+  const params = new URLSearchParams();
+
+  Object.entries(req.query || {}).forEach(([key, value]) => {
+    if (key === "page" || key === "limit") return;
+    params.set(key, String(value));
+  });
+
+  const createLink = (targetPage) => {
+    const localParams = new URLSearchParams(params);
+    localParams.set("page", String(targetPage));
+    localParams.set("limit", String(limit));
+    return `${req.path}?${localParams.toString()}`;
+  };
+
+  return {
+    self: createLink(page),
+    next: page < totalPages ? createLink(page + 1) : null,
+    prev: page > 1 ? createLink(page - 1) : null,
+  };
+}
 
 function invalidQueryParamsError() {
   return {
@@ -280,6 +303,13 @@ async function getAllProfilesHandler(req, res) {
       page: parsed.options.page,
       limit: parsed.options.limit,
       total: result.total,
+      total_pages: Math.max(1, Math.ceil(result.total / parsed.options.limit)),
+      links: buildPaginationLinks(
+        req,
+        parsed.options.page,
+        parsed.options.limit,
+        Math.max(1, Math.ceil(result.total / parsed.options.limit)),
+      ),
       data: result.data,
     });
   } catch (_error) {
@@ -329,8 +359,77 @@ async function searchProfilesHandler(req, res) {
       page: pagination.page,
       limit: pagination.limit,
       total: result.total,
+      total_pages: Math.max(1, Math.ceil(result.total / pagination.limit)),
+      links: buildPaginationLinks(
+        req,
+        pagination.page,
+        pagination.limit,
+        Math.max(1, Math.ceil(result.total / pagination.limit)),
+      ),
       data: result.data,
     });
+  } catch (_error) {
+    return res.status(500).json({
+      status: "error",
+      message: "Upstream or server failure",
+    });
+  }
+}
+
+async function exportProfilesHandler(req, res) {
+  const format = String((req.query && req.query.format) || "").toLowerCase();
+
+  if (format !== "csv") {
+    return res.status(422).json({
+      status: "error",
+      message: "Invalid query parameters",
+    });
+  }
+
+  const parsed = parseAndValidateListQuery(req.query || {});
+  if (parsed.statusCode) {
+    return res.status(parsed.statusCode).json(parsed.body);
+  }
+
+  try {
+    const data = await exportProfiles(parsed.filters, {
+      sort_by: parsed.options.sort_by,
+      order: parsed.options.order,
+    });
+
+    const headers = [
+      "id",
+      "name",
+      "gender",
+      "gender_probability",
+      "age",
+      "age_group",
+      "country_id",
+      "country_name",
+      "country_probability",
+      "created_at",
+    ];
+
+    const escapeCell = (value) => {
+      const cell = String(value ?? "");
+      if (cell.includes(",") || cell.includes("\n") || cell.includes('"')) {
+        return `"${cell.replace(/"/g, '""')}"`;
+      }
+      return cell;
+    };
+
+    const rows = data.map((item) =>
+      headers.map((h) => escapeCell(item[h])).join(","),
+    );
+    const csv = [headers.join(","), ...rows].join("\n");
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="profiles_${Date.now()}.csv"`,
+    );
+
+    return res.status(200).send(csv);
   } catch (_error) {
     return res.status(500).json({
       status: "error",
@@ -366,5 +465,6 @@ module.exports = {
   getSingleProfileHandler,
   getAllProfilesHandler,
   searchProfilesHandler,
+  exportProfilesHandler,
   deleteProfileHandler,
 };

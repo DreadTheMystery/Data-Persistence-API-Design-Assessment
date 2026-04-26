@@ -1,13 +1,19 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const cookieParser = require("cookie-parser");
 const profilesRouter = require("./routes/profileRoutes");
+const authRouter = require("./routes/authRoutes");
+const { requireAuth } = require("./middleware/authMiddleware");
+const { requireApiVersion } = require("./middleware/versionMiddleware");
+const { apiRateLimit } = require("./middleware/rateLimitMiddleware");
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(cors({ origin: "*" }));
 app.use(express.json());
+app.use(cookieParser());
 
 // Simple request logging middleware (method, URL, status, duration)
 app.use((req, res, next) => {
@@ -24,6 +30,9 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use("/auth", authRouter);
+
+app.use("/api", requireAuth, apiRateLimit, requireApiVersion);
 app.use("/api/profiles", profilesRouter);
 
 app.get("/", (req, res) => {

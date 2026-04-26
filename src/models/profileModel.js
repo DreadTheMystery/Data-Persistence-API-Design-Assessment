@@ -101,9 +101,11 @@ async function listProfiles(filters, options) {
     });
   }
 
-  const from = (options.page - 1) * options.limit;
-  const to = from + options.limit - 1;
-  query = query.range(from, to);
+  if (options.paginate !== false) {
+    const from = (options.page - 1) * options.limit;
+    const to = from + options.limit - 1;
+    query = query.range(from, to);
+  }
 
   const { data, error, count } = await query;
 
@@ -113,6 +115,15 @@ async function listProfiles(filters, options) {
     data: data || [],
     total: count || 0,
   };
+}
+
+async function exportProfiles(filters, options) {
+  const result = await listProfiles(filters, {
+    ...options,
+    paginate: false,
+  });
+
+  return result.data;
 }
 
 async function deleteProfile(id) {
@@ -133,5 +144,6 @@ module.exports = {
   findById,
   createProfile,
   listProfiles,
+  exportProfiles,
   deleteProfile,
 };
