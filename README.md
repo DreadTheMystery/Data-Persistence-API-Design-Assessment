@@ -164,9 +164,9 @@ Logging:
 - status code
 - response time
 
-## CLI Usage (Target)
+## CLI Usage
 
-The backend supports these CLI command flows:
+The backend supports these CLI command flows (implemented in `cli/`):
 
 - `insighta login`
 - `insighta logout`
@@ -176,6 +176,29 @@ The backend supports these CLI command flows:
 - `insighta profiles search "..."`
 - `insighta profiles create --name "..."`
 - `insighta profiles export --format csv`
+
+CLI quick start:
+
+- `cd cli && npm install`
+- optional `export INSIGHTA_API_BASE_URL="https://your-backend-domain"`
+- `npm link`
+- `insighta --help`
+
+## Web Portal (Minimal Deployable)
+
+A minimal browser client is available in `web-portal/` with:
+
+- Login
+- Dashboard
+- Profiles list/detail
+- Search
+- Account + logout
+
+Web portal quick start:
+
+- `cd web-portal && npm start`
+- Open `http://localhost:5173`
+- Configure API base URL in the page header if needed
 
 ## Run
 

@@ -11,7 +11,29 @@ const { apiRateLimit } = require("./middleware/rateLimitMiddleware");
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(cors({ origin: "*" }));
+const allowedOrigins = [
+  process.env.WEB_PORTAL_URL,
+  process.env.BACKEND_BASE_URL,
+]
+  .filter(Boolean)
+  .map((origin) => origin.replace(/\/$/, ""));
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (
+        !allowedOrigins.length ||
+        allowedOrigins.includes(origin.replace(/\/$/, ""))
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
+    credentials: true,
+    exposedHeaders: ["X-CSRF-Token"],
+  }),
+);
 app.use(express.json());
 app.use(cookieParser());
 
@@ -32,7 +54,7 @@ app.use((req, res, next) => {
 
 app.use("/auth", authRouter);
 
-app.use("/api", requireAuth, apiRateLimit, requireApiVersion);
+app.use("/api", requireApiVersion, requireAuth, apiRateLimit);
 app.use("/api/profiles", profilesRouter);
 
 app.get("/", (req, res) => {

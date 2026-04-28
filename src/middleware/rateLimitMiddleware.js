@@ -15,7 +15,9 @@ function getKey(req, scope) {
   const forwardedFor = req.headers["x-forwarded-for"];
   const ip = Array.isArray(forwardedFor)
     ? forwardedFor[0]
-    : String(forwardedFor || req.ip || "unknown").split(",")[0].trim();
+    : String(forwardedFor || req.ip || "unknown")
+        .split(",")[0]
+        .trim();
 
   return `ip:${ip}`;
 }
@@ -48,8 +50,8 @@ function enforceLimit(scope, limit, windowMs) {
   };
 }
 
-const authRateLimit = enforceLimit("auth", 10, 60 * 1000);
-const apiRateLimit = enforceLimit("api", 60, 60 * 1000);
+const authRateLimit = enforceLimit("auth", 50, 60 * 1000);
+const apiRateLimit = enforceLimit("api", 200, 60 * 1000);
 
 module.exports = {
   authRateLimit,

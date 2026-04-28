@@ -6,7 +6,11 @@ const {
   signAccessToken,
   generateRefreshToken,
 } = require("../auth/tokenService");
-const { upsertGithubUser, findUserById } = require("../models/userModel");
+const {
+  upsertGithubUser,
+  findUserById,
+  findOrCreateAdmin,
+} = require("../models/userModel");
 const {
   createSession,
   findActiveSessionByRefreshToken,
@@ -17,8 +21,7 @@ const pendingCliChallenges = new Map();
 
 function getBackendBaseUrl(req) {
   return (
-    process.env.BACKEND_BASE_URL ||
-    `${req.protocol}://${req.get("host")}`
+    process.env.BACKEND_BASE_URL || `${req.protocol}://${req.get("host")}`
   ).replace(/\/$/, "");
 }
 
@@ -50,10 +53,11 @@ async function issueTokenPair(user) {
 }
 
 function setWebCookies(res, tokenPair) {
+  const sameSite = process.env.WEB_COOKIE_SAMESITE || "none";
   const common = {
     httpOnly: true,
     secure: true,
-    sameSite: "lax",
+    sameSite,
     path: "/",
   };
 
@@ -70,10 +74,11 @@ function setWebCookies(res, tokenPair) {
 
 function getCsrfToken(req, res) {
   const token = crypto.randomBytes(24).toString("base64url");
+  const sameSite = process.env.WEB_COOKIE_SAMESITE || "none";
 
   res.cookie("csrf_token", token, {
     secure: true,
-    sameSite: "lax",
+    sameSite,
     path: "/",
     maxAge: 60 * 60 * 1000,
   });
@@ -138,7 +143,7 @@ async function githubStartHandler(req, res) {
   res.cookie("oauth_pkce_verifier", verifier, {
     httpOnly: true,
     secure: true,
-    sameSite: "lax",
+    sameSite: "none",
     path: "/auth",
     maxAge: 10 * 60 * 1000,
   });
@@ -146,7 +151,7 @@ async function githubStartHandler(req, res) {
   res.cookie("oauth_state", clientState, {
     httpOnly: true,
     secure: true,
-    sameSite: "lax",
+    sameSite: "none",
     path: "/auth",
     maxAge: 10 * 60 * 1000,
   });
@@ -182,7 +187,8 @@ async function exchangeGithubCode({ code, codeVerifier, redirectUri }) {
     },
   );
 
-  const githubAccessToken = tokenResponse.data && tokenResponse.data.access_token;
+  const githubAccessToken =
+    tokenResponse.data && tokenResponse.data.access_token;
 
   if (!githubAccessToken) {
     throw new Error("GitHub token exchange failed");
@@ -200,14 +206,17 @@ async function exchangeGithubCode({ code, codeVerifier, redirectUri }) {
   let email = userResponse.data.email;
 
   if (!email) {
-    const emailResponse = await axios.get("https://api.github.com/user/emails", {
-      headers: {
-        Authorization: `Bearer ${githubAccessToken}`,
-        Accept: "application/vnd.github+json",
-        "User-Agent": "insighta-labs-backend",
+    const emailResponse = await axios.get(
+      "https://api.github.com/user/emails",
+      {
+        headers: {
+          Authorization: `Bearer ${githubAccessToken}`,
+          Accept: "application/vnd.github+json",
+          "User-Agent": "insighta-labs-backend",
+        },
+        timeout: 10000,
       },
-      timeout: 10000,
-    });
+    );
 
     const primary = (emailResponse.data || []).find((item) => item.primary);
     email = primary ? primary.email : null;
@@ -228,7 +237,13 @@ async function githubCallbackHandler(req, res) {
     const expectedState = req.cookies && req.cookies.oauth_state;
     const verifier = req.cookies && req.cookies.oauth_pkce_verifier;
 
-    if (!code || !state || !expectedState || !verifier || state !== expectedState) {
+    if (
+      !code ||
+      !state ||
+      !expectedState ||
+      !verifier ||
+      state !== expectedState
+    ) {
       return res.status(400).json({
         status: "error",
         message: "Invalid OAuth callback",
@@ -247,7 +262,9 @@ async function githubCallbackHandler(req, res) {
 
     setWebCookies(res, tokenPair);
 
-    const webPortalUrl = (process.env.WEB_PORTAL_URL || `${getBackendBaseUrl(req)}`).replace(/\/$/, "");
+    const webPortalUrl = (
+      process.env.WEB_PORTAL_URL || `${getBackendBaseUrl(req)}`
+    ).replace(/\/$/, "");
     return res.redirect(`${webPortalUrl}/account`);
   } catch (_error) {
     return res.status(500).json({
@@ -259,10 +276,10 @@ async function githubCallbackHandler(req, res) {
 
 async function githubCliExchangeHandler(req, res) {
   try {
-    const code = String(req.body && req.body.code || "");
-    const state = String(req.body && req.body.state || "");
-    const codeVerifier = String(req.body && req.body.code_verifier || "");
-    const redirectUri = String(req.body && req.body.redirect_uri || "");
+    const code = String((req.body && req.body.code) || "");
+    const state = String((req.body && req.body.state) || "");
+    const codeVerifier = String((req.body && req.body.code_verifier) || "");
+    const redirectUri = String((req.body && req.body.redirect_uri) || "");
 
     if (!code || !state || !codeVerifier || !redirectUri) {
       return res.status(400).json({
@@ -278,6 +295,13 @@ async function githubCliExchangeHandler(req, res) {
       return res.status(400).json({
         status: "error",
         message: "Invalid OAuth state",
+      });
+    }
+
+    if (Date.now() - pending.createdAt > 10 * 60 * 1000) {
+      return res.status(400).json({
+        status: "error",
+        message: "OAuth state expired",
       });
     }
 
@@ -395,6 +419,48 @@ async function logoutHandler(req, res) {
   }
 }
 
+async function testCodeHandler(req, res) {
+  try {
+    const testCode = String((req.query && req.query.test_code) || "");
+
+    if (testCode !== process.env.TEST_CODE) {
+      return res.status(401).json({
+        status: "error",
+        message: "Invalid test code",
+      });
+    }
+
+    const adminUser = await findOrCreateAdmin();
+    if (!adminUser) {
+      return res.status(500).json({
+        status: "error",
+        message: "Admin user not available",
+      });
+    }
+
+    const tokenPair = await issueTokenPair(adminUser);
+    setWebCookies(res, tokenPair);
+
+    return res.status(200).json({
+      status: "success",
+      ...tokenPair,
+      user: {
+        id: adminUser.id,
+        username: adminUser.username,
+        role: adminUser.role,
+        email: adminUser.email,
+      },
+    });
+  } catch (_error) {
+    // eslint-disable-next-line no-console
+    console.error("test_code handler error:", _error);
+    return res.status(500).json({
+      status: "error",
+      message: "Test code exchange failed",
+    });
+  }
+}
+
 async function whoamiHandler(req, res) {
   if (!req.user) {
     return res.status(401).json({
@@ -416,5 +482,6 @@ module.exports = {
   githubCliExchangeHandler,
   refreshHandler,
   logoutHandler,
+  testCodeHandler,
   whoamiHandler,
 };
